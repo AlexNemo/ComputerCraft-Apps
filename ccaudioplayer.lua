@@ -1,54 +1,16 @@
-os.pullEvent = os.pullEventRaw
-
+local tape = peripheral.find("tape_drive")
 -- Audio functions
-function findTape()
-  local tape = peripheral.wrap("left")
-  if not(tape == nil) then
-    if not(tape.play == nil) then
-      return tape
-    end
-  end
-  tape = peripheral.wrap("right")
-  if not(tape == nil) then
-    if not(tape.play == nil) then
-      return tape
-    end
-  end
-  tape = peripheral.wrap("up")
-  if not(tape == nil) then
-    if not(tape.play == nil) then
-      return tape
-    end
-  end
-  tape = peripheral.wrap("down")
-  if not(tape == nil) then
-    if not(tape.play == nil) then
-      return tape
-    end
-  end
-  tape = peripheral.wrap("front")
-  if not(tape == nil) then
-    if not(tape.play == nil) then
-      return tape
-    end
-  end
-  tape = peripheral.wrap("back")
-  if not(tape == nil) then
-    if not(tape.play == nil) then
-      return tape
-    end
-  end
-  return nil
+
+local function isTapeEnded()
+  return tape.isEnd()
 end
 
-function clearTape()
-  local tape = findTape()
+local function clearTape()
   tape.seek(-tape.getSize());
   tape.write(string.rep(string.char(0), tape.getSize()));
 end
 
-function playAudio(fn)
-  local tape = findTape()
+local function playAudio(fn)
   tape.seek(-tape.getSize())
   local fh = fs.open(fn, "rb")
   tape.write(fh.readAll())
@@ -57,11 +19,11 @@ function playAudio(fn)
   tape.play()
 end
 
-function getAudio()
+local function getAudio()
   local fh = fs.open("disk/.audio", "r")
   local data = {}
   local s = fh.readLine()
-  while not (s == "") and not (s == nil) do
+  while s ~= "" and s do
     local audioName = s
 
     local audioAuthor = fh.readLine()
@@ -72,7 +34,7 @@ function getAudio()
     end
 
     local audioFile = fh.readLine()
-    if (audioFile == "") or (audioFile == nil) then
+    if (audioFile == "") or not audioFile then
       return {}
     end
 
@@ -91,13 +53,13 @@ function getAudio()
   return data
 end
 
-function lenTab(T)
+local function lenTab(T)
   local count = 0
   for _ in pairs(T) do count = count + 1 end
   return count
 end
 
-function getItem(T, i)
+local function getItem(T, i)
   local count = 0
   for _, v in pairs(T) do
     if count == i then
@@ -108,18 +70,24 @@ function getItem(T, i)
   return nil
 end
 
-function drawList(data, selit)
+local function drawList(data, selit, playit, pstate)
   term.setBackgroundColor(colors.black)
   term.setTextColor(colors.white)
   term.setCursorPos(1,1)
   term.clear()
   local i = 0
   for k, fn in pairs(data) do
+    term.setBackgroundColor(colors.gray)
+    term.setTextColor(colors.white)
+    if (i == playit) and tape.getState() == "PLAYING" then
+      term.setBackgroundColor(colors.green)
+      term.setTextColor(colors.white)
+    elseif (i == playit) and (tape.getState() == "STOPPED" or tape.getState() == "REWINDING" or tape.getState() == "FORWARDING") and not tape.isEnd() then
+      term.setBackgroundColor(colors.red)
+      term.setTextColor(colors.white)
+    end
     if i == selit then
       term.setBackgroundColor(colors.orange)
-      term.setTextColor(colors.white)
-    else
-      term.setBackgroundColor(colors.gray)
       term.setTextColor(colors.white)
     end
     print(k)
@@ -131,9 +99,20 @@ end
 local audio = getAudio()
 
 local selectedItem = 0
+local playingItem = -1
+local playingState = false
+
+local function draw()
+  drawList(audio, selectedItem, playingItem, playingState)
+end
+
+draw()
+
+local timer = os.startTimer(1)
+
 while true do
-  drawList(audio, selectedItem)
-  local event, key = os.pullEvent( "key" )
+  --drawList(audio, selectedItem, playingItem, playingState)
+  local event, par = os.pullEventRaw()
   -- If app is terminated then stop music
   if event == "terminate" then
     term.setBackgroundColor(colors.black)
@@ -142,17 +121,41 @@ while true do
     term.setCursorPos(1,1)
     clearTape()
     break
+  elseif event == "timer" then
+    if par == timer then
+      timer = os.startTimer(1)
+      if isTapeEnded() then
+        playingItem = -1
+        playingState = false
+      end
+      draw()
+    end
   end
-  if key == keys.up then
-    if selectedItem > 0 then
-      selectedItem = selectedItem - 1
-    end
-  elseif key == keys.down then
-    if selectedItem < lenTab(audio) - 1 then
-      selectedItem = selectedItem + 1
-    end
-  elseif key == keys.enter then
-      clearTape()
-      playAudio("disk/"..getItem(audio, selectedItem))
+  if event == "key" then
+    if par == keys.up then
+      if selectedItem > 0 then
+        selectedItem = selectedItem - 1
+      end
+    elseif par == keys.down then
+      if selectedItem < lenTab(audio) - 1 then
+        selectedItem = selectedItem + 1
+      end
+    elseif par == keys.enter then
+        if selectedItem == playingItem then
+          if playingState == true then
+            tape.stop()
+            playingState = false
+          else
+            tape.play()
+            playingState = true
+          end
+        else
+          clearTape()
+          playAudio("disk/"..getItem(audio, selectedItem))
+          playingItem = selectedItem
+          playingState = true
+        end
+      end
+      draw()
   end
 end
